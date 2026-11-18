@@ -1,0 +1,161 @@
+import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { createMemoryRouter, RouterProvider } from 'react-router';
+import Register from '../pages/Register';
+import { Provider } from 'react-redux';
+import store from '../store';
+import { api } from '../utils/api';
+import { toast } from 'react-toastify';
+
+jest.mock('../utils/api');
+jest.mock('react-toastify', () => ({
+  toast: {
+    error: jest.fn(),
+    warn: jest.fn(),
+  },
+}));
+const renderComponent = () => {
+  const routes = [
+    {
+      path: '/',
+      element: (
+        <Provider store={store}>
+          <Register />
+        </Provider>
+      ),
+    },
+  ];
+  const router = createMemoryRouter(routes, {
+    initialEntries: ['/'],
+  });
+
+  render(<RouterProvider router={router} />);
+};
+
+describe('register page', () => {
+  beforeEach(() => { });
+  test('register will display the initial fields', () => {
+    renderComponent();
+
+    expect(screen.getByLabelText(/username/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/email/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/password/i)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /login/i })).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: /register/i })
+    ).toBeInTheDocument();
+  });
+
+  test('submits form with correct data and navigates to login', async () => {
+    (api.post as jest.Mock).mockResolvedValue({
+      status: 201,
+      data: { username: 'nirmalk', email: 'n@mail.com', password: 'password' },
+    });
+    renderComponent();
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText(/username/i), 'nirmalk');
+    await user.type(screen.getByLabelText(/email/i), 'n@mail.com');
+    await user.type(screen.getByLabelText(/password/i), 'password');
+    await user.click(screen.getByRole('button', { name: /register/i }));
+
+
+    await waitFor(() => {
+      expect(api.post).toHaveBeenCalledWith('/users/register', {
+        username: 'nirmalk',
+        email: 'n@mail.com',
+        password: 'password',
+      });
+    });
+  });
+
+  test('submits form with invalid username will show error and prevent submission', async () => {
+    renderComponent();
+    const user = userEvent.setup();
+
+    await user.type(screen.getByLabelText(/username/i), 'ni');
+    await user.type(screen.getByLabelText(/email/i), 'n@mail.com');
+    await user.type(screen.getByLabelText(/password/i), 'password');
+    await user.click(screen.getByRole('button', { name: /register/i }));
+
+    expect(
+      screen.getByText(/Username must be at least 3 characters/i)
+    ).toBeInTheDocument();
+  });
+
+  test('shows error toast when registration fails', async () => {
+    const mockError = new Error('Username already exists');
+    (mockError as any).status = 400;
+    (mockError as any).errors = ['Username already exists'];
+    (api.post as jest.Mock).mockRejectedValue(mockError);
+
+    renderComponent();
+    const user = userEvent.setup();
+
+    await user.type(screen.getByLabelText(/username/i), 'nirmalk');
+    await user.type(screen.getByLabelText(/email/i), 'n@mail.com');
+    await user.type(screen.getByLabelText(/password/i), 'password');
+
+    await user.click(screen.getByRole('button', { name: /register/i }));
+
+    await waitFor(() => {
+      expect(api.post).toHaveBeenCalled();
+      expect(toast.error).toHaveBeenCalledWith('Username already exists');
+    });
+  });
+
+  test('shows error toast when registration fails with network error', async () => {
+    (api.post as jest.Mock).mockRejectedValue(new Error('Network error'));
+
+    renderComponent();
+    const user = userEvent.setup();
+
+    await user.type(screen.getByLabelText(/username/i), 'nirmalk');
+    await user.type(screen.getByLabelText(/email/i), 'n@mail.com');
+    await user.type(screen.getByLabelText(/password/i), 'password');
+
+    await user.click(screen.getByRole('button', { name: /register/i }));
+
+    await waitFor(() => {
+      expect(api.post).toHaveBeenCalled();
+      expect(toast.error).toHaveBeenCalledWith('Network error');
+    });
+  });
+
+  test('throws error if response status is not 201', async () => {
+    (api.post as jest.Mock).mockResolvedValue({
+      status: 200,
+      data: { id: 1 },
+    });
+
+    renderComponent();
+    const user = userEvent.setup();
+
+    await user.type(screen.getByLabelText(/username/i), 'nirmalk');
+    await user.type(screen.getByLabelText(/email/i), 'n@mail.com');
+    await user.type(screen.getByLabelText(/password/i), 'password');
+
+    await user.click(screen.getByRole('button', { name: /register/i }));
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith('Registration failed');
+    });
+  });
+
+  test('throws error if response data is missing', async () => {
+    (api.post as jest.Mock).mockResolvedValue({
+      status: 201,
+      data: null,
+    });
+
+    renderComponent();
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText(/username/i), 'nirmalk');
+    await user.type(screen.getByLabelText(/email/i), 'n@mail.com');
+    await user.type(screen.getByLabelText(/password/i), 'password');
+    await user.click(screen.getByRole('button', { name: /register/i }));
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith('Registration failed');
+    });
+  });
+});
